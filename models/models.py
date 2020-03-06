@@ -23,7 +23,7 @@ from layers import Conv2D, CorrelateTransform, Dense, TransformNet
 # Defind model using keras functional api
 # def Model(batch_size, bn_momentum, point_nums, name='PointNet'):
 #     points = tf.keras.layers.Input(shape=(point_nums, 3), batch_size=batch_size, name='point_clouds', dtype=tf.float32)
-def CorintNet(point_nums=None, bn_momentum=None, name='CorintNet'):
+def PointNet(point_nums=None, bn_momentum=None, name='CorintNet'):
     inputs = tf.keras.layers.Input(shape=(point_nums, 3), name='point_clouds', dtype=tf.float32)
     inputs_transformed = TransformNet(add_regularization=True, use_bn=True, bn_momentum=bn_momentum)(inputs)
     # inputs = tf.expand_dims(points, axis=3)
@@ -117,6 +117,6 @@ def CorintNet(point_nums=None, bn_momentum=None, name='CorintNet'):
 if __name__ == "__main__":
     """ Test all models when run directly
     """
-    model = CorintNet(bn_momentum=0.99)
+    model = PointNet(bn_momentum=0.99)
     model.summary()
     tf.keras.utils.plot_model(model, to_file=os.path.join(BASE_DIR, 'corint_net.png'), show_shapes=True)

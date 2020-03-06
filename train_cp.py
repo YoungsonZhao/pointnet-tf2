@@ -22,15 +22,11 @@ import numpy as np
 
 # Customization Models and Utils
 from data_utils import download_modelnet40, augmentation, sample
-from models import PointNet
+from models import CorintNet
+from model import get_model
 
 import argparse
 from datetime import datetime
-
-def custom_loss(labels, logits):
-    x = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logits)
-    loss = tf.math.reduce_mean(x)
-    return loss
 
 # Parsing Arguments
 parser = argparse.ArgumentParser()
@@ -67,61 +63,68 @@ train_data, train_label, test_data, test_label = download_modelnet40()
 train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_label))
 train_dataset = train_dataset.map(augmentation, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 train_dataset = train_dataset.shuffle(buffer_size=10000)
-train_dataset = train_dataset.batch(batch_size=BATCH_SIZE)
+train_dataset = train_dataset.batch(batch_size=BATCH_SIZE).repeat()
 train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
 test_dataset = tf.data.Dataset.from_tensor_slices((test_data, test_label))
 test_dataset = test_dataset.map(sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 test_dataset = test_dataset.batch(batch_size=BATCH_SIZE*2)
 
-model = PointNet(point_nums=POINT_NUMS, bn_momentum=BN_MOMENTUM)
-optimizer = tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
-loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
+# # Define Model
+# mirrored_strategy = tf.distribute.MirroredStrategy()
+# with mirrored_strategy.scope():
+#     model = CorintNet(point_nums=POINT_NUMS, bn_momentum=BN_MOMENTUM)
+#     # model = get_model(bn_momentum=BN_MOMENTUM)
+#     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+#                 loss='categorical_crossentropy',
+#                 metrics=['categorical_accuracy'])
 
-acc_metric_train = tf.keras.metrics.CategoricalAccuracy()
-acc_metric_val = tf.keras.metrics.CategoricalAccuracy()
+model = CorintNet(point_nums=POINT_NUMS, bn_momentum=BN_MOMENTUM)
+# # model = get_model(bn_momentum=BN_MOMENTUM)
+# model.compile(optimizer=tf.keras.optimizers.RMSprop(learning_rate=LEARNING_RATE),
+#             loss='categorical_crossentropy',
+#             metrics=['accuracy'])
 
-def train():
-    model.summary()
-    tf.keras.utils.plot_model(model, to_file=os.path.join(BASE_DIR, 'models/corint_net.png'), show_shapes=True)
-    print('Start Training...')
-    for index in range(EPOCHS):
-        print('Epoch: {}'.format(index))
-        for step, (inputs, labels) in enumerate(train_dataset):
-            loss = train_step(inputs, labels)
-            if step % 25 == 0:
-                print('Training loss at step {}: {}, accuracy: {}'.format(step, loss, float(acc_metric_train.result())))
-        
-        accuracy_train = acc_metric_train.result()
-        print('Training accuracy at epoch {}: {}'.format(index, float(accuracy_train)))
-        acc_metric_train.reset_states()
+for data, labels in train_dataset:
+    print(data)
+    print(labels)
+    logits = model(data, training=True)
+    loss1 = tf.math.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, labels))
+    loss2 = sum(model.losses)
+    print(loss1)
+    print(loss2)
+    input('Continue...')
 
-        for inputs, labels in test_dataset:
-            val_step(inputs, labels)
-        accuracy_val = acc_metric_val.result()
-        acc_metric_val.reset_states()
-        print('Validation accuracy at epoch {}: {}'.format(index, float(accuracy_val)))
+model.summary()
+tf.keras.utils.plot_model(model, to_file=os.path.join(BASE_DIR, 'models/corint_net.png'), show_shapes=True)
 
+# lastest_checkpoint = tf.train.latest_checkpoint(CHECKPOINT_DIR)
+# if lastest_checkpoint:
+#     model.load_weights(lastest_checkpoint)
+#     model.evaluate(test_dataset, verbose=2)
 
+def scheduler(epoch):
+    return LEARNING_RATE / (10**(epoch // 25))
+    # return 0.01
 
-@tf.function
-def train_step(inputs, labels):
-    with tf.GradientTape() as tape:
-        logits = model(inputs, training=True)
-        loss_1 = loss_fn(y_true=labels, y_pred=logits)
-        loss_2 = sum(model.losses)
-        loss = loss_1 + loss_2
-    
-    gradients = tape.gradient(loss, model.trainable_weights)
-    optimizer.apply_gradients(zip(gradients, model.trainable_weights))
-    acc_metric_train(y_true=labels, y_pred=logits)
-    return loss
+callbacks = [
+    tf.keras.callbacks.TensorBoard(log_dir=os.path.join(LOG_DIR, TIMESTAMP)),
+    tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PREFIX, save_weights_only=True, save_freq='epoch'),
+    tf.keras.callbacks.LearningRateScheduler(scheduler)
+]
 
-@tf.function
-def val_step(inputs, labels):
-    logits = model(inputs, training=False)
-    acc_metric_val(y_true=labels, y_pred=logits)
+model.fit(train_dataset,
+          steps_per_epoch=STEPS_PER_EPOCHS,
+          epochs=EPOCHS,
+          verbose=2,
+          callbacks=callbacks)
+         # validation_data=test_dataset,
+         # validation_steps=16,
+         # validation_freq=1)
 
+# stop_time = datetime.now()
+# train_time = stop_time - start_time
+# print('Time used in training: {} s.'.format(train_time.total_seconds()))
+# model.save_weights('log/lenet', save_format='tf')
 
-if __name__ == '__main__':
-    train()
+model.evaluate(test_dataset, verbose=2)
