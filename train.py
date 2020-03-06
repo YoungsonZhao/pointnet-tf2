@@ -89,7 +89,7 @@ def train():
         print('Epoch: {}'.format(index))
         for step, (inputs, labels) in enumerate(train_dataset):
             loss = train_step(inputs, labels)
-            if step % 25 == 0:
+            if step % 100 == 0:
                 print('Training loss at step {}: {}, accuracy: {}'.format(step, loss, float(acc_metric_train.result())))
         
         accuracy_train = acc_metric_train.result()
